@@ -5,6 +5,7 @@ import os
 from typing import Any, Dict
 
 MIN_DEPTH = 0
+MIN_QUOTED_LEN = 2
 
 
 class ConfigError(Exception):
@@ -32,16 +33,27 @@ class Config:
         }
 
 
-def _parse_scalar(val_str: str) -> Any:
-    """Parse scalar TOML value into a Python object."""
-    if val_str.startswith('"') and val_str.endswith('"') and len(val_str) >= 2:
-        return val_str[1:-1]
-    if val_str.startswith("'") and val_str.endswith("'") and len(val_str) >= 2:
-        return val_str[1:-1]
+def _parse_quoted_string(val_str: str) -> Any:
+    """Parse quoted string if matching quotation rules."""
+    quotes = ('"', "'")
+    for quote in quotes:
+        has_quotes = val_str.startswith(quote) and val_str.endswith(quote)
+        if has_quotes and len(val_str) >= MIN_QUOTED_LEN:
+            return val_str[1:-1]
+    return None
+
+
+def _parse_boolean(val_str: str) -> Any:
+    """Parse boolean literal from string."""
     if val_str == "true":
         return True
     if val_str == "false":
         return False
+    return None
+
+
+def _parse_number(val_str: str) -> Any:
+    """Parse integer or float from string representation."""
     try:
         return int(val_str)
     except ValueError:
@@ -50,6 +62,19 @@ def _parse_scalar(val_str: str) -> Any:
         return float(val_str)
     except ValueError as err:
         raise ConfigError(f"Unsupported value format: {val_str}") from err
+
+
+def _parse_scalar(val_str: str) -> Any:
+    """Parse scalar TOML value into a Python object."""
+    str_val = _parse_quoted_string(val_str)
+    if str_val is not None:
+        return str_val
+
+    bool_val = _parse_boolean(val_str)
+    if bool_val is not None:
+        return bool_val
+
+    return _parse_number(val_str)
 
 
 def _parse_simple_toml(content: str) -> Dict[str, Any]:
@@ -83,7 +108,7 @@ def _parse_simple_toml(content: str) -> Dict[str, Any]:
 def parse_toml(content: str) -> Dict[str, Any]:
     """Parse TOML content using tomllib if available, else fallback."""
     try:
-        import tomllib  # type: ignore
+        import tomllib
 
         return tomllib.loads(content)
     except ImportError:
@@ -92,35 +117,39 @@ def parse_toml(content: str) -> Dict[str, Any]:
         raise ConfigError(f"Failed to parse TOML content: {exc}") from exc
 
 
-def _validate_types_and_values(raw: Dict[str, Any]) -> None:
-    """Validate data types and specific value rules."""
-    if not isinstance(raw["package_name"], str) or not raw["package_name"]:
-        raise ConfigError("Parameter 'package_name' must be a non-empty string")
+def _validate_string_param(param_name: str, value: Any) -> None:
+    """Validate that parameter is a non-empty string."""
+    if not isinstance(value, str):
+        raise ConfigError(f"Parameter '{param_name}' must be a string")
+    if not value:
+        raise ConfigError(f"Parameter '{param_name}' cannot be empty")
 
-    if not isinstance(raw["repo_url"], str) or not raw["repo_url"]:
-        raise ConfigError("Parameter 'repo_url' must be a non-empty string")
 
-    if not isinstance(raw["test_mode"], bool):
+def _validate_test_mode(value: Any) -> None:
+    """Validate that test_mode parameter is a boolean."""
+    if not isinstance(value, bool):
         raise ConfigError("Parameter 'test_mode' must be a boolean")
 
-    if (
-        not isinstance(raw["package_version"], str)
-        or not raw["package_version"]
-    ):
-        raise ConfigError(
-            "Parameter 'package_version' must be a non-empty string"
-        )
 
-    if not isinstance(raw["max_depth"], int) or isinstance(
-        raw["max_depth"], bool
-    ):
+def _validate_max_depth(value: Any) -> None:
+    """Validate that max_depth parameter is a valid integer."""
+    if isinstance(value, bool):
+        raise ConfigError("Parameter 'max_depth' cannot be boolean")
+    if not isinstance(value, int):
         raise ConfigError("Parameter 'max_depth' must be an integer")
-
-    if raw["max_depth"] < MIN_DEPTH:
+    if value < MIN_DEPTH:
         raise ConfigError(
-            f"Parameter 'max_depth' must be >= {MIN_DEPTH}, "
-            f"got {raw['max_depth']}"
+            f"Parameter 'max_depth' must be >= {MIN_DEPTH}, got {value}"
         )
+
+
+def _validate_types_and_values(raw: Dict[str, Any]) -> None:
+    """Validate data types and specific value rules."""
+    _validate_string_param("package_name", raw["package_name"])
+    _validate_string_param("repo_url", raw["repo_url"])
+    _validate_string_param("package_version", raw["package_version"])
+    _validate_test_mode(raw["test_mode"])
+    _validate_max_depth(raw["max_depth"])
 
 
 def validate_config(raw_data: Dict[str, Any]) -> Config:
