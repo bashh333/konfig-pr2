@@ -1,0 +1,7 @@
+# Configuration file for Cargo Dependency Visualizer (Variant 22)
+
+package_name = "serde"
+repo_url = "https://index.crates.io"
+test_mode = false
+package_version = "1.0.195"
+max_depth = 3
